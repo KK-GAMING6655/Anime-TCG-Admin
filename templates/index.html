@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anime TCG — Admin Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="background-glow"></div>
+    
+    <main class="dashboard-container">
+        <header class="header">
+            <h1>⚡ Anime TCG Admin</h1>
+            <p>Add and deploy new cards directly to Turso Cloud DB</p>
+        </header>
+
+        <div class="grid-wrapper">
+            <section class="card-form-wrapper">
+                <form id="addCardForm" enctype="multipart/form-data">
+                    <div class="input-group">
+                        <label for="name">Name of Anime / Character</label>
+                        <input type="text" id="name" name="name" placeholder="e.g. Son Goku" required autocomplete="off">
+                    </div>
+
+                    <div class="input-row">
+                        <div class="input-group">
+                            <label for="rarity">Rarity Tier</label>
+                            <select id="rarity" name="rarity" required>
+                                <option value="Common">Common</option>
+                                <option value="Uncommon">Uncommon</option>
+                                <option value="Rare">Rare</option>
+                                <option value="Epic">Epic</option>
+                                <option value="Legendary">Legendary</option>
+                                <option value="Super Legendary">Super Legendary</option>
+                            </select>
+                        </div>
+
+                        <div class="input-group">
+                            <label for="value">Value (🪙 Coins)</label>
+                            <input type="number" id="value" name="value" placeholder="1000" min="0" required>
+                        </div>
+                    </div>
+
+                    <div class="input-group">
+                        <label>Image Source</label>
+                        <div class="toggle-tabs">
+                            <button type="button" class="tab-btn active" data-type="file">Upload File</button>
+                            <button type="button" class="tab-btn" data-type="url">Paste URL</button>
+                        </div>
+                        <input type="hidden" name="upload_type" id="upload_type" value="file">
+                    </div>
+
+                    <div class="input-group image-input-container" id="fileGroup">
+                        <div class="file-drop-area" id="dropArea">
+                            <span class="file-msg">📁 Click or drag image here (.png, .jpg, .webp)</span>
+                            <input type="file" id="image_file" name="image_file" accept="image/*">
+                        </div>
+                    </div>
+
+                    <div class="input-group image-input-container hidden" id="urlGroup">
+                        <input type="url" id="image_url" name="image_url" placeholder="https://example.com/image.png">
+                    </div>
+
+                    <button type="submit" id="submitBtn" class="btn-submit">
+                        <span class="btn-text">✨ Add Card</span>
+                        <div class="spinner hidden"></div>
+                    </button>
+                </form>
+            </section>
+
+            <section class="preview-wrapper">
+                <h3>Live Card Preview</h3>
+                <div class="card-preview" id="cardPreview">
+                    <div class="rarity-badge" id="previewBadge">Common</div>
+                    <div class="image-box">
+                        <img id="previewImg" src="https://via.placeholder.com/300x400/12131C/505370?text=Card+Image" alt="Preview">
+                    </div>
+                    <div class="card-details">
+                        <h4 id="previewTitle">Card Name</h4>
+                        <div class="card-value"><span id="previewValue">0</span> 🪙</div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
+
