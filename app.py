@@ -3,7 +3,7 @@ import random
 import requests
 from flask import Flask, render_template, request, jsonify
 
-# Try importing libsql; if Vercel fails to load C-bindings, fallback to HTTP API
+# Fallback mechanism in case Vercel fails to load native C-bindings for libsql
 try:
     import libsql
     HAS_LIBSQL = True
@@ -12,18 +12,23 @@ except ImportError:
 
 app = Flask(__name__)
 
-# Turso DB Configuration (Pulled from Vercel Environment Variables)
+# Turso DB Configuration (Pulled from Environment Variables)
 TURSO_URL = os.getenv("TURSO_URL", "")
 TURSO_TOKEN = os.getenv("TURSO_TOKEN", "")
 
-def execute_query_http(sql, params):
-    """Fallback HTTP execution for Turso when native libsql library isn't available."""
+def execute_query_http(sql, params=()):
+    """Executes SQL query using Turso REST HTTP API (Pure Python fallback for serverless)."""
+    if not TURSO_URL or not TURSO_TOKEN:
+        raise Exception("TURSO_URL or TURSO_TOKEN environment variables are missing on Vercel.")
+
     http_url = TURSO_URL.replace("libsql://", "https://").rstrip("/") + "/v2/pipeline"
     
     args = []
     for param in params:
         if isinstance(param, int):
             args.append({"type": "integer", "value": str(param)})
+        elif param is None:
+            args.append({"type": "null"})
         else:
             args.append({"type": "text", "value": str(param)})
 
@@ -48,20 +53,22 @@ def execute_query_http(sql, params):
     res = requests.post(http_url, json=payload, headers=headers, timeout=10)
     if res.status_code != 200:
         raise Exception(f"Turso HTTP Error ({res.status_code}): {res.text}")
+    
     return res.json()
 
-def execute_query(sql, params):
-    """Executes a query using either native libsql driver or Turso HTTP fallback."""
+def execute_query(sql, params=()):
+    """Executes query using either native libsql driver or HTTP fallback."""
     if HAS_LIBSQL:
         conn = libsql.connect(TURSO_URL, auth_token=TURSO_TOKEN)
         cursor = conn.cursor()
         cursor.execute(sql, params)
         conn.commit()
+        conn.close()
     else:
         execute_query_http(sql, params)
 
 def upload_file_to_catbox(file_storage):
-    """Uploads a local image file directly to Catbox and returns the URL."""
+    """Uploads local image file directly to Catbox and returns the hosted URL."""
     url = "https://catbox.moe/user/api.php"
     data = {"reqtype": "fileupload"}
     files = {"fileToUpload": (file_storage.filename, file_storage.stream, file_storage.content_type)}
@@ -71,7 +78,7 @@ def upload_file_to_catbox(file_storage):
     if response.status_code == 200 and response.text.startswith("https://files.catbox.moe/"):
         return response.text.strip()
     else:
-        raise Exception(f"Catbox Upload Error: {response.text}")
+        raise Exception(f"Catbox Upload Failed: {response.text}")
 
 @app.route('/')
 def index():
@@ -86,13 +93,21 @@ def add_card():
         image_type = request.form.get('image_type')
 
         if not name or not rarity or value is None:
-            return jsonify({"success": False, "message": "All fields are required!"}), 400
+            return jsonify({
+                "success": False, 
+                "message": "All fields (Name, Rarity, Value) are required!",
+                "error": "All fields (Name, Rarity, Value) are required!"
+            }), 400
 
         final_image_url = ""
 
         if image_type == 'file':
             if 'image_file' not in request.files or request.files['image_file'].filename == '':
-                return jsonify({"success": False, "message": "Please attach an image file!"}), 400
+                return jsonify({
+                    "success": False, 
+                    "message": "Please attach an image file!",
+                    "error": "Please attach an image file!"
+                }), 400
             
             image_file = request.files['image_file']
             final_image_url = upload_file_to_catbox(image_file)
@@ -100,21 +115,29 @@ def add_card():
         elif image_type == 'url':
             final_image_url = request.form.get('image_url', '').strip()
             if not final_image_url:
-                return jsonify({"success": False, "message": "Please paste an image URL!"}), 400
+                return jsonify({
+                    "success": False, 
+                    "message": "Please enter an image URL!",
+                    "error": "Please enter an image URL!"
+                }), 400
         else:
-            return jsonify({"success": False, "message": "Invalid image submission type."}), 400
+            return jsonify({
+                "success": False, 
+                "message": "Invalid image submission type.",
+                "error": "Invalid image submission type."
+            }), 400
 
-        # Generate 6-digit card_id string matching main.py logic
+        # Generate 6-digit card_id string matching bot logic
         card_id = str(random.randint(100000, 999999))
 
-        # Insert new card into Turso database
+        # Save to database
         sql = 'INSERT INTO cards (card_id, name, rarity, value, image) VALUES (?, ?, ?, ?, ?)'
         params = (card_id, name, rarity, value, final_image_url)
         execute_query(sql, params)
 
         return jsonify({
             "success": True, 
-            "message": f"Card '{name}' created successfully!",
+            "message": f"Card '{name}' added successfully!",
             "card": {
                 "card_id": card_id,
                 "name": name,
@@ -125,7 +148,12 @@ def add_card():
         })
 
     except Exception as e:
-        return jsonify({"success": False, "message": str(e)}), 500
+        err_msg = str(e)
+        return jsonify({
+            "success": False, 
+            "message": err_msg, 
+            "error": err_msg
+        }), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
