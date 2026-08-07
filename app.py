@@ -3,7 +3,7 @@ import random
 import requests
 from flask import Flask, render_template, request, jsonify
 
-# Fallback mechanism in case Vercel fails to load native C-bindings for libsql
+# Check if native libsql C-bindings can be loaded
 try:
     import libsql
     HAS_LIBSQL = True
@@ -12,12 +12,12 @@ except ImportError:
 
 app = Flask(__name__)
 
-# Turso DB Configuration (Pulled from Environment Variables)
+# Turso DB Configuration
 TURSO_URL = os.getenv("TURSO_URL", "")
 TURSO_TOKEN = os.getenv("TURSO_TOKEN", "")
 
 def execute_query_http(sql, params=()):
-    """Executes SQL query using Turso REST HTTP API (Pure Python fallback for serverless)."""
+    """Executes SQL query using Turso REST HTTP API with complete error checking."""
     if not TURSO_URL or not TURSO_TOKEN:
         raise Exception("TURSO_URL or TURSO_TOKEN environment variables are missing on Vercel.")
 
@@ -51,13 +51,30 @@ def execute_query_http(sql, params=()):
     }
     
     res = requests.post(http_url, json=payload, headers=headers, timeout=10)
+    
     if res.status_code != 200:
         raise Exception(f"Turso HTTP Error ({res.status_code}): {res.text}")
     
-    return res.json()
+    data = res.json()
+    
+    # Check inner Turso pipeline results for SQL errors
+    results = data.get("results", []) or data.get("batched", [])
+    for result in results:
+        if result.get("type") == "error":
+            err_details = result.get("error", {})
+            err_msg = err_details.get("message", "Unknown Database Error")
+            
+            if "UNIQUE constraint failed" in err_msg:
+                raise Exception("A card with this name already exists in the database!")
+            elif "no such table" in err_msg:
+                raise Exception("Database table 'cards' does not exist yet.")
+            else:
+                raise Exception(f"Database Error: {err_msg}")
+
+    return data
 
 def execute_query(sql, params=()):
-    """Executes query using either native libsql driver or HTTP fallback."""
+    """Executes query using native libsql driver or HTTP fallback."""
     if HAS_LIBSQL:
         conn = libsql.connect(TURSO_URL, auth_token=TURSO_TOKEN)
         cursor = conn.cursor()
@@ -67,8 +84,25 @@ def execute_query(sql, params=()):
     else:
         execute_query_http(sql, params)
 
+def init_db_if_needed():
+    """Ensure table exists in Turso DB before attempting inserts."""
+    try:
+        sql = '''CREATE TABLE IF NOT EXISTS cards (
+            card_id TEXT PRIMARY KEY, 
+            name TEXT UNIQUE, 
+            rarity TEXT, 
+            value INTEGER, 
+            image TEXT
+        )'''
+        execute_query(sql)
+    except Exception as e:
+        print(f"DB Init Warning: {e}")
+
+# Initialize DB structure on startup
+init_db_if_needed()
+
 def upload_file_to_catbox(file_storage):
-    """Uploads local image file directly to Catbox and returns the hosted URL."""
+    """Uploads local image file directly to Catbox and returns hosted URL."""
     url = "https://catbox.moe/user/api.php"
     data = {"reqtype": "fileupload"}
     files = {"fileToUpload": (file_storage.filename, file_storage.stream, file_storage.content_type)}
@@ -130,14 +164,14 @@ def add_card():
         # Generate 6-digit card_id string matching bot logic
         card_id = str(random.randint(100000, 999999))
 
-        # Save to database
+        # Insert into Turso database
         sql = 'INSERT INTO cards (card_id, name, rarity, value, image) VALUES (?, ?, ?, ?, ?)'
         params = (card_id, name, rarity, value, final_image_url)
         execute_query(sql, params)
 
         return jsonify({
             "success": True, 
-            "message": f"Card '{name}' added successfully!",
+            "message": f"Card '{name}' created successfully!",
             "card": {
                 "card_id": card_id,
                 "name": name,
@@ -157,4 +191,4 @@ def add_card():
 
 if __name__ == '__main__':
     app.run(debug=True)
-        
+    
